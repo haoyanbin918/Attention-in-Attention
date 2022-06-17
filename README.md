@@ -1,7 +1,7 @@
 # Attention in Attention: Modeling Context Correlation for Efficient Video Classification (IEEE TCVST 2022)
 This is an official implementaion of paper "Attention in Attention: Modeling Context Correlation for Efficient Video Classification", which has been accepted by IEEE TCVST 2022. [`Paper link`](https://arxiv.org/pdf/2204.09303.pdf)
 <div align="center">
-  <img src="demo/AIA.jpg" width="900px"/>
+  <img src="demo/AIA.jpg" width="1100px"/>
 </div>
 
 

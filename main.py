@@ -96,7 +96,6 @@ def main():
                 target_transforms=target_transforms)
 
     crop_size = model.scale_size if args.full_res else model.input_size # 224 or 256 (scale_size)
-    crop_size_val2 = model.input_size
     scale_size = model.scale_size # 256
     input_mean = model.input_mean
     input_std = model.input_std
@@ -204,31 +203,12 @@ def main():
                    transform=torchvision.transforms.Compose([
                        # GroupScale(int(scale_size)),
                        GroupScale((240,320)),
-                       GroupCenterCrop(240),
+                       GroupCenterCrop(crop_size),
                        Stack(roll=(args.arch in ['BNInception', 'InceptionV3'])),
                        ToTorchFormatTensor(div=(args.arch not in ['BNInception', 'InceptionV3'])),
                        normalize,
                    ]), dense_sample=args.dense_sample, twice_sample=args.twice_sample),
         batch_size=val_batch_size, shuffle=False,
-        num_workers=args.workers, pin_memory=True)
-    
-    # test_list = '/vireo00/yanbin2/Sport_Video/videos_our/TraValTes/%s_tsm/test.txt'%args.dataset
-    test_batch_size = args.batch_size*4
-    test_loader = torch.utils.data.DataLoader(
-        TSNDataSet(args.root_path, args.val_list, num_segments=args.num_segments,
-                   new_length=data_length,
-                   modality=args.modality,
-                   image_tmpl=prefix,
-                   random_shift=False,
-                   transform=torchvision.transforms.Compose([
-                       # GroupScale(int(scale_size)),
-                       GroupScale((240,320)),
-                       GroupCenterCrop(crop_size_val2),
-                       Stack(roll=(args.arch in ['BNInception', 'InceptionV3'])),
-                       ToTorchFormatTensor(div=(args.arch not in ['BNInception', 'InceptionV3'])),
-                       normalize,
-                   ]), dense_sample=args.dense_sample),
-        batch_size=test_batch_size, shuffle=False,
         num_workers=args.workers, pin_memory=True)
 
     # define loss function (criterion) and optimizer
@@ -276,27 +256,6 @@ def main():
                 'optimizer': optimizer.state_dict(),
                 'best_prec1': best_prec1,
             }, is_best)
-
-            # test
-            prec1_test = validate2(test_loader, model, criterion, epoch, log_training, tf_writer)
-
-            # remember best prec@1 and save checkpoint
-            is_best_test = prec1_test > best_prec1_test
-            best_prec1_test = max(prec1_test, best_prec1_test)
-            tf_writer.add_scalar('acc/valCenter_top1_best', best_prec1_test, epoch)
-
-            output_best = 'Best val (center crop) Prec@1: %.3f\n' % (best_prec1_test)
-            print(output_best)
-            log_training.write(output_best + '\n')
-            log_training.flush()
-
-            save_checkpoint_test({
-                'epoch': epoch + 1,
-                'arch': args.arch,
-                'state_dict': model.state_dict(),
-                'optimizer': optimizer.state_dict(),
-                'best_prec1': best_prec1_test,
-            }, is_best_test)
 
 
 def train(train_loader, model, criterion, optimizer, epoch, log, tf_writer):
@@ -428,75 +387,12 @@ def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
 
     return top1.avg
 
-def validate2(val_loader, model, criterion, epoch, log=None, tf_writer=None):
-    batch_time = AverageMeter()
-    losses = AverageMeter()
-    top1 = AverageMeter()
-    top5 = AverageMeter()
-
-    # switch to evaluate mode
-    model.eval()
-
-    end = time.time()
-    with torch.no_grad():
-        for i, (input, target) in enumerate(val_loader):
-            target = target.cuda()
-
-            # compute output
-            output = model(input)
-            loss = criterion(output, target)
-
-            # measure accuracy and record loss
-            prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
-
-            losses.update(loss.item(), input.size(0))
-            top1.update(prec1.item(), input.size(0))
-            top5.update(prec5.item(), input.size(0))
-
-            # measure elapsed time
-            batch_time.update(time.time() - end)
-            end = time.time()
-
-            if i % args.print_freq == 0:
-                output = ('Test: [{0}/{1}]\t'
-                          'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                          'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                          'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                          'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
-                    i, len(val_loader), batch_time=batch_time, loss=losses,
-                    top1=top1, top5=top5))
-                print(output)
-                if log is not None:
-                    log.write(output + '\n')
-                    log.flush()
-
-    output = ('Testing Results: Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f} Loss {loss.avg:.5f}'
-              .format(top1=top1, top5=top5, loss=losses))
-    print(output)
-    if log is not None:
-        log.write(output + '\n')
-        log.flush()
-
-    if tf_writer is not None:
-        tf_writer.add_scalar('loss/valCenter', losses.avg, epoch)
-        tf_writer.add_scalar('acc/valCenter_top1', top1.avg, epoch)
-        tf_writer.add_scalar('acc/valCenter_top5', top5.avg, epoch)
-
-    return top1.avg
-
 
 def save_checkpoint(state, is_best):
     filename = '%s/%s/ckpt.pth.tar' % (args.root_model, args.store_name)
     torch.save(state, filename)
     if is_best:
         shutil.copyfile(filename, filename.replace('pth.tar', 'best.pth.tar'))
-
-def save_checkpoint_test(state, is_best):
-    filename = '%s/%s/ckpt_test.pth.tar' % (args.root_model, args.store_name)
-    torch.save(state, filename)
-    if is_best:
-        shutil.copyfile(filename, filename.replace('pth.tar', 'best.pth.tar'))
-
 
 def adjust_learning_rate(optimizer, epoch, lr_type, lr_steps):
     """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
